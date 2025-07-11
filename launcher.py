@@ -19,7 +19,7 @@ def run_selected_script():
     script_path = os.path.join(SCRIPTS_FOLDER, selected_script)
     subprocess.Popen(["python", script_path])
 
-# Création de l'interface
+# Création de l'interface1
 root = tk.Tk()
 root.title("Python Script Launcher")
 
