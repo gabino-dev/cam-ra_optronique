@@ -3,11 +3,26 @@ import tkinter as tk
 from tkinter import ttk
 import subprocess
 
-ELEV_FACTOR = 0.0573      
-BEAR_FACTOR = 0.0573      
+# Facteurs (° ↔ unité brute)
+ELEV_FACTOR = 0.0573      # 1 unité ≈ 0.0573°
+BEAR_FACTOR = 0.0573      # idem pour le bearing
+
+# Décalage pour la zone négative (zéro expérimental ≈ 31 415)
+NEG_OFFSET  = 31415       # valeur brute correspondant à ≈ 0°
 
 def deg_to_elev_bytes(angle_deg: float) -> tuple[int, int]:
-    raw = int(round(angle_deg / ELEV_FACTOR)) & 0xFFFF
+    """
+    Convertit l’élévation en ° vers 2 octets (Little Endian) selon :
+      • angle ≥ 0 : raw = angle / FACTEUR
+      • angle < 0 : raw = angle / FACTEUR + NEG_OFFSET
+    Retourne (LSB, MSB).
+    """
+    if angle_deg >= 0:
+        raw = int(round(angle_deg / ELEV_FACTOR))
+    else:
+        raw = int(round(angle_deg / ELEV_FACTOR + NEG_OFFSET))
+
+    raw &= 0xFFFF  # UInt16
     return raw & 0xFF, (raw >> 8) & 0xFF
 
 def deg_to_bear_bytes(angle_deg: float) -> tuple[int, int]:
@@ -18,16 +33,13 @@ def deg_to_bear_bytes(angle_deg: float) -> tuple[int, int]:
 root = tk.Tk()
 root.title("VIGY - Slew to Position (CAN 0x20C)")
 
-frm = ttk.Frame(root, padding=20)
-frm.grid()
+frm = ttk.Frame(root, padding=20); frm.grid()
 
 ttk.Label(frm, text="Bearing (°) :").grid(column=0, row=0, sticky="W")
-bearing_var = tk.StringVar(value="70")
-ttk.Entry(frm, textvariable=bearing_var, width=10).grid(column=1, row=0)
+bearing_var = tk.StringVar(value="70"); ttk.Entry(frm, textvariable=bearing_var, width=10).grid(column=1, row=0)
 
 ttk.Label(frm, text="Elevation (°) :").grid(column=0, row=1, sticky="W")
-elev_var = tk.StringVar(value="-10")
-ttk.Entry(frm, textvariable=elev_var, width=10).grid(column=1, row=1)
+elev_var = tk.StringVar(value="-10"); ttk.Entry(frm, textvariable=elev_var, width=10).grid(column=1, row=1)
 
 result_var = tk.StringVar()
 
@@ -36,31 +48,24 @@ def compute():
         bearing = float(bearing_var.get())
         elev    = float(elev_var.get())
 
-        # Vérification de plage
-        if not (-69.9 <= elev <= 69.9):
-            result_var.set("Erreur : élévation hors plage [-69.9°, 69.9°].")
+        if elev < -30 or elev >= 70:
+            result_var.set("Erreur : élévation hors plage [-30°, 70°).")
             return
 
-        # Octet de commande fixe
-        byte0 = 0x0C
+        byte0 = 0x0C  # stabilisation + slewing deux axes
 
-        # Calcul des octets LSB/MSB
         el_lsb, el_msb = deg_to_elev_bytes(elev)
         be_lsb, be_msb = deg_to_bear_bytes(bearing)
 
-        # Construit la chaîne hexadécimale
         data_str = f"{byte0:02X}{el_lsb:02X}{el_msb:02X}{be_lsb:02X}{be_msb:02X}"
-        frame_id = "20C"
-        cmd = f"cansend can0 {frame_id}#{data_str}"
+        cmd = f"cansend can0 20C#{data_str}"
 
-        # Affiche et exécute la commande dans le terminal
         print(f"Envoi : {cmd}")
         ret = subprocess.call(cmd, shell=True)
 
         if ret != 0:
-            result_var.set(f"Erreur lors de l'envoi (code {ret})")
+            result_var.set(f"Erreur d'envoi (code {ret})")
         else:
-            # Affichage dans la GUI
             trame_hex = f"{byte0:02X} {el_lsb:02X} {el_msb:02X} {be_lsb:02X} {be_msb:02X}"
             result_var.set(f"Trame envoyée : {trame_hex}")
 
