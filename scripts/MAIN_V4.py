@@ -2,22 +2,18 @@ import tkinter as tk
 from tkinter import ttk
 import subprocess
 import math
+import can
 import struct
 import threading
-import queue
-import os
-import signal
-import can 
 
-# === CAN read via candump subprocess ===
-CAN_ID_POSITION = '105'
-
-# Facteurs (degrés ↔ unités)
+# Facteurs (° ↔ unité brute)
 ELEV_FACTOR = 0.0573
 BEAR_FACTOR = 0.0573
-NEG_OFFSET = 31415.5
+NEG_OFFSET  = 31415.5
 
-# === Conversion CAN ===
+arrow_symbols = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖']
+
+
 def deg_to_elev_bytes(angle_deg: float):
     if angle_deg >= 0:
         raw = int(round(angle_deg / ELEV_FACTOR))
@@ -44,30 +40,37 @@ fov_modes = [
     (0,    "VWFOV",   41,  1)
 ]
 
-# === UI ===
 root = tk.Tk()
-root.title("VIGY - Slew, FOV, Position")
+root.title("VIGY - Slew to Position, FOV & Live Position")
 main_frame = ttk.Frame(root, padding=10)
 main_frame.grid()
 
-# === Slew Frame ===
+# === CAN Frame (angle_to_can) ===
 can_frame = ttk.LabelFrame(main_frame, text="Envoi CAN (0x20C)", padding=20)
 can_frame.grid(column=0, row=0, padx=10, pady=10, sticky="N")
 
 bearing_var = tk.StringVar(value="70")
 elev_var = tk.StringVar(value="-10")
 result_var = tk.StringVar()
+indicator_var = tk.StringVar(value="Cap visé : --°")
+arrow_var = tk.StringVar(value="")
 
-ttk.Label(can_frame, text="Bearing (\u00b0) :").grid(column=0, row=0, sticky="W")
+indicator_label = ttk.Label(can_frame, textvariable=indicator_var, font=("Courier", 14), foreground="red")
+indicator_label.grid(column=0, row=4, columnspan=2, pady=(10, 0))
+
+direction_label = ttk.Label(can_frame, textvariable=arrow_var, font=("Helvetica", 30))
+direction_label.grid(column=0, row=5, columnspan=2)
+
+ttk.Label(can_frame, text="Bearing (°) :").grid(column=0, row=0, sticky="W")
 ttk.Entry(can_frame, textvariable=bearing_var, width=10).grid(column=1, row=0)
 
-ttk.Label(can_frame, text="Elevation (\u00b0) :").grid(column=0, row=1, sticky="W")
+ttk.Label(can_frame, text="Elevation (°) :").grid(column=0, row=1, sticky="W")
 ttk.Entry(can_frame, textvariable=elev_var, width=10).grid(column=1, row=1)
 
 def compute_can():
     try:
         bearing = float(bearing_var.get())
-        elev = float(elev_var.get())
+        elev    = float(elev_var.get())
         if elev < -30 or elev >= 70:
             result_var.set("Erreur : élévation hors plage [-30°, 70°).")
             return
@@ -110,79 +113,74 @@ def compute_fov():
 ttk.Button(fov_frame, text="Calculer", command=compute_fov).grid(column=0, row=1, columnspan=2, pady=10)
 ttk.Label(fov_frame, textvariable=fov_result_var, background="#eee", padding=10).grid(column=0, row=2, columnspan=2, sticky="W")
 
-# === Live Position ===
+
+def send_unlock():
+    try:
+        cmd = "cansend can0 205#00"
+        subprocess.call(cmd, shell=True)
+        result_var.set("Trame UNLOCK envoyée (205#00)")
+    except Exception as e:
+        result_var.set(f"Erreur UNLOCK : {e}")
+
+ttk.Button(can_frame, text="Unlock", command=send_unlock).grid(column=0, row=6, columnspan=2, pady=10)
+       
+# === LIVE POSITION Frame ===
 live_frame = ttk.LabelFrame(main_frame, text="Position actuelle (0x105)", padding=20)
 live_frame.grid(column=2, row=0, padx=10, pady=10, sticky="N")
 
 elevation_live_var = tk.StringVar(value="Élévation : -- °")
 bearing_live_var = tk.StringVar(value="Bearing : -- °")
 
-ttk.Label(live_frame, textvariable=elevation_live_var).grid(row=0, column=0, sticky="W", pady=5)
-ttk.Label(live_frame, textvariable=bearing_live_var).grid(row=1, column=0, sticky="W", pady=5)
+label_elev = ttk.Label(live_frame, textvariable=elevation_live_var, font=("Helvetica", 16))
+label_bear = ttk.Label(live_frame, textvariable=bearing_live_var, font=("Helvetica", 16))
+label_elev.grid(row=0, column=0, sticky="W", pady=5)
+label_bear.grid(row=1, column=0, sticky="W", pady=5)
 
-# === Canvas visuel ===
-canvas_frame = ttk.LabelFrame(main_frame, text="Orientation Caméra", padding=10)
-canvas_frame.grid(column=2, row=1, padx=10, pady=10)
-canvas_size = 200
-canvas = tk.Canvas(canvas_frame, width=canvas_size, height=canvas_size, bg="white")
-canvas.grid()
-center_x, center_y = canvas_size // 2, canvas_size // 2
-radius = 80
-canvas.create_oval(center_x - radius, center_y - radius, center_x + radius, center_y + radius, outline="black")
-canvas.create_text(center_x, center_y, text="🚢", font=("Helvetica", 18))
-line_id = canvas.create_line(center_x, center_y, center_x, center_y - radius, fill="red", width=2, arrow=tk.LAST)
+# === Interface CAN ===
+can_interface = 'can0'
+bus = can.interface.Bus(channel=can_interface, interface='socketcan')
 
-def update_bearing_visu(bearing_deg):
-    angle_rad = math.radians(bearing_deg - 90)
-    x = center_x + radius * math.cos(angle_rad)
-    y = center_y + radius * math.sin(angle_rad)
-    canvas.coords(line_id, center_x, center_y, x, y)
+stop_thread = False
 
-# === CAN lecture via subprocess (candump) ===
-msg_queue = queue.Queue()
+def get_arrow_from_bearing(deg):
+    idx = int(((deg % 360) + 22.5) // 45) % 8
+    return arrow_symbols[idx]
 
-proc = subprocess.Popen([
-    "candump", "-n", "0", "can0"
-], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
-
-def can_reader():
-    for line in proc.stdout:
-        if f"{CAN_ID_POSITION}#" in line:
-            try:
-                hex_data = line.strip().split('#')[1]
-                raw = bytes.fromhex(hex_data)
-                elev_rad = struct.unpack('<f', raw[0:4])[0]
-                bear_rad = struct.unpack('<f', raw[4:8])[0]
+def can_loop():
+    global stop_thread
+    while not stop_thread:
+        try:
+            msg = bus.recv(timeout=0.01)
+            if msg and msg.arbitration_id == 0x105 and len(msg.data) >= 8:
+                elev_rad = struct.unpack('<f', msg.data[0:4])[0]
+                bear_rad = struct.unpack('<f', msg.data[4:8])[0]
                 elev_deg = math.degrees(elev_rad)
+                bear_deg = math.degrees(bear_rad)
+
+                # Affichage dans l'intervalle [-180, 180[
                 if elev_deg >= 180:
                     elev_deg -= 360
-                bear_deg = math.degrees(bear_rad) % 360
-                msg_queue.put((elev_deg, bear_deg))
-            except:
-                continue
 
-threading.Thread(target=can_reader, daemon=True).start()
+                elevation_live_var.set(f"Élévation : {elev_deg:.2f} °")
+                bearing_live_var.set(f"Bearing : {bear_deg:.2f} °")
+                indicator_var.set(f"Cap visé : {bear_deg:.2f} °")
+                arrow_var.set(get_arrow_from_bearing(bear_deg))
+        except Exception as e:
+            print("Erreur lecture CAN :", e)
 
-def update_gui():
-    try:
-        while not msg_queue.empty():
-            elev_deg, bear_deg = msg_queue.get()
-            elevation_live_var.set(f"Élévation : {elev_deg:.2f} °")
-            bearing_live_var.set(f"Bearing : {bear_deg:.2f} °")
-            update_bearing_visu(bear_deg)
-    except:
-        pass
-    root.after(40, update_gui)
-
-update_gui()
-
-# === Fermeture propre ===
 def on_close():
+    global stop_thread
+    stop_thread = True
+    root.after(100, shutdown_bus)
+
+def shutdown_bus():
     try:
-        os.kill(proc.pid, signal.SIGTERM)
-    except:
-        pass
+        bus.shutdown()
+        print("Bus CAN fermé proprement.")
+    except Exception as e:
+        print(f"Erreur à la fermeture du bus : {e}")
     root.destroy()
 
+threading.Thread(target=can_loop, daemon=True).start()
 root.protocol("WM_DELETE_WINDOW", on_close)
 root.mainloop()
