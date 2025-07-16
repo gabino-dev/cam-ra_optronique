@@ -3,13 +3,16 @@ import tkinter as tk
 from tkinter import ttk
 import subprocess
 import math
+import can
+import struct
+import threading
 
 # Facteurs (° ↔ unité brute)
 ELEV_FACTOR = 0.0573      # 1 unité ≈ 0.0573°
 BEAR_FACTOR = 0.0573      # idem pour le bearing
 
-# Décalage pour la zone négative (zéro expérimental ≈ 31 415)
-NEG_OFFSET  = 31415       # valeur brute correspondant à ≈ 0°
+# Décalage pour la zone négative (zéro expérimental ≈ 31 415.5)
+NEG_OFFSET  = 31415.5       # valeur brute correspondant à ≈ 0°
 
 def deg_to_elev_bytes(angle_deg: float) -> tuple[int, int]:
     if angle_deg >= 0:
@@ -38,7 +41,7 @@ fov_modes = [
 ]
 
 root = tk.Tk()
-root.title("VIGY - Slew to Position & FOV Calculator")
+root.title("VIGY - Slew to Position, FOV & Live Position")
 
 main_frame = ttk.Frame(root, padding=10)
 main_frame.grid()
@@ -162,4 +165,59 @@ ttk.Label(fov_frame, textvariable=fov_result_var, justify="left", background="#e
     column=0, row=2, columnspan=2, sticky="W"
 )
 
+# === LIVE POSITION Frame (position_cam_live) ===
+live_frame = ttk.LabelFrame(main_frame, text="Position actuelle (0x105)", padding=20)
+live_frame.grid(column=2, row=0, padx=10, pady=10, sticky="N")
+
+elevation_live_var = tk.StringVar(value="Élévation : -- °")
+bearing_live_var = tk.StringVar(value="Bearing : -- °")
+
+ttk.Label(live_frame, textvariable=elevation_live_var, font=("Helvetica", 16)).grid(row=0, column=0, sticky="W", pady=5)
+ttk.Label(live_frame, textvariable=bearing_live_var, font=("Helvetica", 16)).grid(row=1, column=0, sticky="W", pady=5)
+
+# === Interface CAN pour live ===
+can_interface = 'can0'
+bus = can.interface.Bus(channel=can_interface, bustype='socketcan')
+
+stop_thread = False
+
+def can_loop():
+    global stop_thread
+    while not stop_thread:
+        try:
+            msg = bus.recv(timeout=0.01)
+            if msg and msg.arbitration_id == 0x105 and len(msg.data) >= 8:
+                elev_rad = struct.unpack('<f', msg.data[0:4])[0]
+                bear_rad = struct.unpack('<f', msg.data[4:8])[0]
+
+                elev_deg = math.degrees(elev_rad)
+                bear_deg = math.degrees(bear_rad)
+
+                # Affichage dans l'intervalle [-180, 180[
+                if elev_deg >= 180:
+                    elev_deg -= 360
+
+                elevation_live_var.set(f"Élévation : {elev_deg:.2f} °")
+                bearing_live_var.set(f"Bearing : {bear_deg:.2f} °")
+        except Exception as e:
+            print("Erreur lecture CAN :", e)
+
+def on_close():
+    global stop_thread
+    stop_thread = True
+    root.after(100, shutdown_bus)
+
+def shutdown_bus():
+    try:
+        bus.shutdown()
+        print("Bus CAN fermé proprement.")
+    except Exception as e:
+        print(f"Erreur à la fermeture du bus : {e}")
+    root.destroy()
+
+# === Lancer thread CAN séparé ===
+threading.Thread(target=can_loop, daemon=True).start()
+
+                 
+root.protocol("WM_DELETE_WINDOW", on_close)
 root.mainloop()
