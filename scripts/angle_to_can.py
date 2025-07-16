@@ -54,10 +54,10 @@ def compute():
 
         byte0 = 0x0C  # stabilisation + slewing deux axes
 
-        el_lsb, el_msb = deg_to_elev_bytes(elev)
-        be_lsb, be_msb = deg_to_bear_bytes(bearing)
+        elevation_lsb, elevation_msb = deg_to_elev_bytes(elev)
+        bearing_lsb, bearing_msb = deg_to_bear_bytes(bearing)
 
-        data_str = f"{byte0:02X}{el_lsb:02X}{el_msb:02X}{be_lsb:02X}{be_msb:02X}"
+        data_str = f"{byte0:02X}{elevation_lsb:02X}{elevation_msb:02X}{bearing_lsb:02X}{bearing_msb:02X}"
         cmd = f"cansend can0 20C#{data_str}"
 
         print(f"Envoi : {cmd}")
@@ -66,7 +66,7 @@ def compute():
         if ret != 0:
             result_var.set(f"Erreur d'envoi (code {ret})")
         else:
-            trame_hex = f"{byte0:02X} {el_lsb:02X} {el_msb:02X} {be_lsb:02X} {be_msb:02X}"
+            trame_hex = f"{byte0:02X} {elevation_lsb:02X} {elevation_msb:02X} {bearing_lsb:02X} {bearing_msb:02X}"
             result_var.set(f"Trame envoyée : {trame_hex}")
 
     except ValueError:
