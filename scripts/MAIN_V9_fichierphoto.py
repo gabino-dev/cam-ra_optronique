@@ -220,6 +220,8 @@ class CameraInterface(QWidget):
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH,640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT,480)
         self.cap.set(cv2.CAP_PROP_FOURCC,cv2.VideoWriter_fourcc(*'MJPG'))
+        self.cap.set(cv2.CAP_PROP_FPS, 60)
+
         self.timer.start(30);self.start_btn.setEnabled(False);self.stop_btn.setEnabled(True)
 
     def update_frame(self):
