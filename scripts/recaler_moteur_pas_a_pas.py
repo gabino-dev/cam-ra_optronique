@@ -2,14 +2,14 @@ import serial
 import time
 
 # Port série de l’Arduino
-PORT = "/dev/ttyUSB1"
+PORT = "/dev/ttyUSB0"
 BAUDRATE = 9600
 
 # Dernière position connue (tu peux aussi la lire depuis un fichier si besoin)
 
 
 # Nouvelle position : on décale de -1°, et on reste dans [0, 359]
-new_position = 5
+new_position = 10
 
 try:
     ser = serial.Serial(PORT, BAUDRATE, timeout=1)
