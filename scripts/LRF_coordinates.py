@@ -68,7 +68,6 @@ class NMEAReader(QThread):
         self.running = False
         self.wait()
 
-
 class CANReader(QThread):
     update_data = Signal(float, float)
     update_digital_zoom = Signal(int)
@@ -94,14 +93,13 @@ class CANReader(QThread):
                 raw = msg.data[1] | (msg.data[2] << 8)
                 self.update_digital_zoom.emit(raw)
             elif msg.arbitration_id == 0x107 and len(msg.data) >= 2:
-                dist_cm = msg.data[0] | (msg.data[1] << 8)
-                self.update_lrf.emit(dist_cm)
+                dist_m = msg.data[0] | (msg.data[1] << 8)
+                self.update_lrf.emit(dist_m)
 
     def stop(self):
         self.running = False
         self.quit()
         self.wait()
-
 
 class CompassWidget(QWidget):
     def __init__(self):
@@ -170,7 +168,6 @@ class CompassWidget(QWidget):
         ]
         painter.drawPolygon(QPolygon(pts))
 
-
 class CameraInterface(QWidget):
     def __init__(self):
         super().__init__()
@@ -178,14 +175,12 @@ class CameraInterface(QWidget):
         self.setFixedSize(1250, 700)
 
         # Données
-        self.last_elev = 0.0
-        self.last_bear = 0.0
-        self.digital_zoom_val = 0
-        self.lrf_dist_cm = None
-
+        self.last_elev = 0.0             # élévation caméra
+        self.last_bear = 0.0             # bearing caméra relatif
+        self.last_head = 0.0             # cap du bateau (azimut réel)
+        self.lrf_dist_m = None           # distance mesurée par le LRF (en mètres)
         self.last_lat = "--"
         self.last_lon = "--"
-        self.last_head = 0.0
         self.last_lat_deg = None
         self.last_lon_deg = None
 
@@ -194,14 +189,12 @@ class CameraInterface(QWidget):
 
         self.compass_widget = CompassWidget()
 
-        # Arduino
         try:
             self.arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
             time.sleep(2)
         except:
             self.arduino = None
 
-        # Moteur pas à pas state
         self.last_sent_angle = None
         self.last_sent_time = time.time()
 
@@ -321,7 +314,6 @@ class CameraInterface(QWidget):
         self.photo_btn.clicked.connect(self.take_photo)
         self.open_btn.clicked.connect(self.open_photos)
 
-        # Déverrouillage initial
         self.send_unlock()
 
     def closeEvent(self, event):
@@ -395,7 +387,7 @@ class CameraInterface(QWidget):
                     print(f"[ERREUR] Envoi série moteur : {e}")
 
     def on_digital_zoom(self, raw):
-        self.digital_zoom_val = raw
+        pass
 
     def on_nmea_update(self, lat, lon, heading):
         self.last_lat, self.last_lon, self.last_head = lat, lon, heading
@@ -410,31 +402,70 @@ class CameraInterface(QWidget):
         self.compass_widget.set_heading(heading)
 
     def compute_target_latlon(self):
-        if None in (self.last_lat_deg, self.last_lon_deg, self.last_bear, self.lrf_dist_cm):
+        if None in (
+            self.last_lat_deg,
+            self.last_lon_deg,
+            self.last_bear,
+            self.last_elev,
+            self.last_head,
+            self.lrf_dist_m
+        ):
             return
-        lat1 = math.radians(self.last_lat_deg)
-        lon1 = math.radians(self.last_lon_deg)
-        br = math.radians(self.last_bear)
-        d = self.lrf_dist_cm / 100.0
-        R = 6371000.0
-        lat2 = math.asin(math.sin(lat1)*math.cos(d/R) +
-                         math.cos(lat1)*math.sin(d/R)*math.cos(br))
-        lon2 = lon1 + math.atan2(math.sin(br)*math.sin(d/R)*math.cos(lat1),
-                                 math.cos(d/R)-math.sin(lat1)*math.sin(lat2))
-        self.target_lat = math.degrees(lat2)
-        self.target_lon = math.degrees(lon2)
+
+        # Entrées explicites
+        lat_cam = self.last_lat_deg
+        lon_cam = self.last_lon_deg
+        bearing_cam = self.last_bear
+        heading_boat = self.last_head
+        elevation_cam = self.last_elev
+        distance_lrf_m = self.lrf_dist_m
+
+        # Bearing absolu (Nord = 0°)
+        bearing_abs = (bearing_cam + heading_boat) % 360
+
+        # Angle horizontal (0 = horizontale)
+        angle_h = -elevation_cam
+        angle_h_rad = math.radians(angle_h)
+
+        # Distance sol
+        d_ground = math.cos(angle_h_rad) * distance_lrf_m
+
+        # En radians
+        bearing_rad = math.radians(bearing_abs)
+        lat1_rad = math.radians(lat_cam)
+        lon1_rad = math.radians(lon_cam)
+
+        dx = d_ground * math.sin(bearing_rad)
+        dy = d_ground * math.cos(bearing_rad)
+
+        R = 6378137.0
+        delta_lat = dy / R
+        delta_lon = dx / (R * math.cos(lat1_rad))
+
+        lat_target = -(lat_cam + math.degrees(delta_lat))
+        lon_target = -(lon_cam + math.degrees(delta_lon))
+
+        self.target_lat = lat_target
+        self.target_lon = lon_target
         self.target_label.setText(
-            f"Lat cible : {self.target_lat:.5f}°\n"
-            f"Lon cible : {self.target_lon:.5f}°"
+            f"Lat cible : {lat_target:.5f}°\n"
+            f"Lon cible : {lon_target:.5f}°"
         )
 
-    def on_lrf(self, dist_cm):
-        if dist_cm == 0:
+        # Debug log
+        print(f"[DEBUG] Position caméra : {lat_cam}, {lon_cam}")
+        print(f"[DEBUG] Cap bateau = {heading_boat:.2f}°, bearing caméra = {bearing_cam:.2f}° → absolu = {bearing_abs:.2f}°")
+        print(f"[DEBUG] Élévation = {elevation_cam:.2f}°, d_sol = {d_ground:.2f} m")
+        print(f"[DEBUG] Δlat = {math.degrees(delta_lat):.5f}, Δlon = {math.degrees(delta_lon):.5f}")
+        print(f"[DEBUG] Cible : {lat_target:.5f}, {lon_target:.5f}")
+
+    def on_lrf(self, dist_m):
+        if dist_m == 0:
             self.lrf_label.setText("-- m")
             self.target_label.setText("Lat cible : --\nLon cible : --")
         else:
-            self.lrf_dist_cm = dist_cm
-            self.lrf_label.setText(f"{dist_cm:.2f} m")
+            self.lrf_dist_m = dist_m
+            self.lrf_label.setText(f"{dist_m:.2f} m")
             self.compute_target_latlon()
 
     def start_capture(self):
@@ -493,7 +524,6 @@ class CameraInterface(QWidget):
         p = os.path.abspath('photos')
         os.makedirs(p, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(p))
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
