@@ -33,7 +33,7 @@ FOV_MAP = {
 class NMEAReader(QThread):
     nmea_update = Signal(str, str, float)
 
-    def __init__(self, port='/dev/pts/7', baud=4800):
+    def __init__(self, port='/dev/pts/2', baud=4800):
         super().__init__()
         self.port = port
         self.baud = baud
@@ -147,7 +147,7 @@ class CompassWidget(QWidget):
             y2 = center.y() - (radius - 18) * math.cos(rad)
             painter.drawLine(int(x1), int(y1), int(x2), int(y2))
 
-        # Flèche rouge = caméra
+        # Flèche rouge = caméra (CAN)
         painter.setPen(QPen(QColor(220, 20, 60), 4))
         cam_angle = self.camera_bearing
         rad = math.radians(cam_angle)
@@ -155,7 +155,7 @@ class CompassWidget(QWidget):
         y = center.y() - (radius - 36) * math.cos(rad)
         painter.drawLine(center, QPoint(int(x), int(y)))
 
-        # Triangle bleu = bateau
+        # Triangle bleu = bateau (NMEA)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(50, 100, 255))
         boat_angle = self.heading
@@ -185,8 +185,6 @@ class CameraInterface(QWidget):
         self.last_lat = "--"
         self.last_lon = "--"
         self.last_head = 0.0
-        self.cam_offset = 0.0      # Camera offset par rapport au bateau
-        self.last_cam_command = 0  # Dernière commande utilisateur caméra (degrés absolus)
         self.compass_widget = CompassWidget()
 
         self.last_sent_angle = None
@@ -298,7 +296,7 @@ class CameraInterface(QWidget):
         self.can_thread.update_lrf.connect(self.on_lrf)
         self.can_thread.start()
 
-        self.nmea_thread = NMEAReader(port='/dev/pts/7')
+        self.nmea_thread = NMEAReader(port='/dev/pts/2')
         self.nmea_thread.nmea_update.connect(self.on_nmea_update)
         self.nmea_thread.start()
 
@@ -350,12 +348,6 @@ class CameraInterface(QWidget):
             data = f"0C{lsb_e:02X}{msb_e:02X}{lsb_b:02X}{msb_b:02X}"
             subprocess.call(f"cansend can0 20C#{data}", shell=True)
             self.result_label.setText(f"Trame 0x20C envoyée: {data}")
-
-            # Quand on bouge la caméra, on met à jour l'offset pour la garder relative au bateau
-            # b = nouvelle consigne caméra (absolue), last_head = cap actuel du bateau
-            self.cam_offset = (b - self.last_head) % 360
-            self.last_cam_command = b
-
         except:
             self.result_label.setText("Erreur: élévation hors plage")
 
@@ -387,9 +379,8 @@ class CameraInterface(QWidget):
         self.bear_live.setText(f"Bearing : {bear:.2f} °")
         self.elev_live.setText(f"Élévation : {elev:.2f} °")
         self.ind_label.setText(f"Cap visé : {bear:.2f} °")
-        # Le trait rouge (caméra) sera calculé côté NMEA update, donc rien à changer ici
+        self.compass_widget.set_camera_bearing(bear)
 
-        # -- Envoi vers Arduino : aucun changement --
         if self.arduino and self.arduino.is_open:
             bearing_int = int(round(bear)) % 360
             now = time.time()
@@ -416,9 +407,6 @@ class CameraInterface(QWidget):
         self.last_head = heading
         self.gps_label.setText(f"Lat : {lat}\nLon : {lon}\nCap : {heading:.2f}°")
         self.compass_widget.set_heading(heading)
-        # Le trait rouge = heading bateau + offset fixé par la dernière commande caméra
-        bearing_camera = (heading + self.cam_offset) % 360
-        self.compass_widget.set_camera_bearing(bearing_camera)
 
     def start_capture(self):
         self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
