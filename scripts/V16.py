@@ -11,7 +11,7 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QGroupBox, QGridLayout, QSizePolicy
+    QLineEdit, QGroupBox, QGridLayout, QSizePolicy, QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QUrl
 from PySide6.QtGui import (
@@ -31,8 +31,86 @@ FOV_MAP = {
     0x0C: 'NFoV'
 }
 
+def parse_ttm(ttm_sentence):
+    """
+    Parse une phrase NMEA $TTM et retourne (distance_m, angle_deg)
+    """
+    fields = ttm_sentence.strip().split(',')
+    if len(fields) < 5 or not fields[0].endswith('TTM'):
+        raise ValueError("Phrase NMEA n'est pas de type TTM")
+    # $TTM,0.054,N,090.0,T,010.0,090.0,Target1,A*24
+    distance = float(fields[1])
+    distance_unit = fields[2]
+    angle = float(fields[3])
+    if distance_unit == 'N':
+        distance_m = distance * 1852
+    elif distance_unit == 'K':
+        distance_m = distance * 1000
+    else:
+        distance_m = distance  # en mètres si pas d'unité
+    return distance_m, angle
+
+def dest_point(lat1, lon1, bearing_deg, distance_m):
+    R = 6371000
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    bearing_rad = math.radians(bearing_deg)
+    d_div_r = distance_m / R
+
+    lat2_rad = math.asin(
+        math.sin(lat1_rad) * math.cos(d_div_r) +
+        math.cos(lat1_rad) * math.sin(d_div_r) * math.cos(bearing_rad)
+    )
+    lon2_rad = lon1_rad + math.atan2(
+        math.sin(bearing_rad) * math.sin(d_div_r) * math.cos(lat1_rad),
+        math.cos(d_div_r) - math.sin(lat1_rad) * math.sin(lat2_rad)
+    )
+    return math.degrees(lat2_rad), math.degrees(lon2_rad)
+
+def calculate_bearing(lat1, lon1, lat2, lon2):
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lon = math.radians(lon2 - lon1)
+
+    x = math.sin(delta_lon) * math.cos(lat2_rad)
+    y = math.cos(lat1_rad) * math.sin(lat2_rad) - \
+        math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(delta_lon)
+    bearing = (math.degrees(math.atan2(x, y)) + 360) % 360
+    return bearing
+
+def relative_bearing(camera_lat, camera_lon, target_lat, target_lon, ship_heading):
+    bearing_abs = calculate_bearing(camera_lat, camera_lon, target_lat, target_lon)
+    rel_bearing = (bearing_abs - ship_heading + 360) % 360
+    return rel_bearing
+
+class RadarTTMWidget(QGroupBox):
+    ttm_target_selected = Signal(str)
+    def __init__(self):
+        super().__init__("Traces Radar TTM")
+        self.list = QListWidget()
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.list)
+        self.setMinimumWidth(410)
+        self.traces = []
+    def add_ttm(self, ttm_sentence):
+        now = datetime.now().strftime("%H:%M:%S")
+        widget = QWidget()
+        h = QHBoxLayout(widget)
+        lab = QLabel(f"{now} - {ttm_sentence[:60]}")
+        btn = QPushButton("Cibler")
+        h.addWidget(lab)
+        h.addWidget(btn)
+        h.setContentsMargins(0,0,0,0)
+        item = QListWidgetItem(self.list)
+        item.setSizeHint(widget.sizeHint())
+        self.list.addItem(item)
+        self.list.setItemWidget(item, widget)
+        btn.clicked.connect(lambda _, t=ttm_sentence: self.ttm_target_selected.emit(t))
+        self.traces.append((ttm_sentence, now))
+
 class NMEAReader(QThread):
     nmea_update = Signal(str, str, float)
+    ttm_trace = Signal(str)
     def __init__(self, port='/dev/pts/7', baud=4800):
         super().__init__()
         self.port = port
@@ -49,6 +127,8 @@ class NMEAReader(QThread):
                 line = ser.readline().decode(errors='ignore').strip()
                 if not line.startswith('$'):
                     continue
+                if line.startswith('$TTM') or line.startswith('$GPTTM'):
+                    self.ttm_trace.emit(line)
                 try:
                     msg = pynmea2.parse(line)
                     if isinstance(msg, pynmea2.RMC):
@@ -261,9 +341,11 @@ class CameraInterface(QWidget):
         col2.addWidget(lrf_group)
         bottom_layout.addLayout(col2)
 
-        # Colonne 3 : GPS/cible + Compass
+        # Colonne 3 : GPS/cible + Compass + Radar TTM
         col3 = QVBoxLayout()
         col3.addWidget(gps_group)
+        self.radar_ttm_widget = RadarTTMWidget()
+        col3.addWidget(self.radar_ttm_widget)
         bottom_layout.addLayout(col3)
 
         autres_group = QGroupBox("AUTRES OPTIONS")
@@ -313,7 +395,10 @@ class CameraInterface(QWidget):
 
         self.nmea_thread = NMEAReader(port='/dev/pts/7')
         self.nmea_thread.nmea_update.connect(self.on_nmea_update)
+        self.nmea_thread.ttm_trace.connect(self.on_ttm_trace)
         self.nmea_thread.start()
+
+        self.radar_ttm_widget.ttm_target_selected.connect(self.cibler_depuis_ttm)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
@@ -406,6 +491,26 @@ class CameraInterface(QWidget):
         self.gps_label.setText(f"Lat : {lat}\nLon : {lon}\nCap : {heading:.2f}°")
         self.compass_widget.set_heading(heading)
 
+    def on_ttm_trace(self, ttm_sentence):
+        self.radar_ttm_widget.add_ttm(ttm_sentence)
+
+    def cibler_depuis_ttm(self, ttm_sentence):
+        try:
+            if self.last_lat_deg is None or self.last_lon_deg is None or self.last_head is None:
+                self.result_label.setText("GPS bateau manquant")
+                return
+            distance_m, angle = parse_ttm(ttm_sentence)
+            target_lat, target_lon = dest_point(self.last_lat_deg, self.last_lon_deg, angle, distance_m)
+            rel_bearing = relative_bearing(
+                self.last_lat_deg, self.last_lon_deg, target_lat, target_lon, self.last_head
+            )
+            raw_bearing = int(round((360 - rel_bearing) / BEAR_FACTOR)) & 0xFFFF
+            data = f"0C0000{raw_bearing & 0xFF:02X}{raw_bearing >> 8:02X}"
+            subprocess.call(f"cansend can0 105#{data}", shell=True)
+            self.result_label.setText(f"Ciblage CAN envoyé: {rel_bearing:.2f}° (data={data})")
+        except Exception as e:
+            self.result_label.setText(f"Erreur ciblage: {e}")
+
     def compute_target_latlon(self):
         if None in (
             self.last_lat_deg,
@@ -442,11 +547,6 @@ class CameraInterface(QWidget):
             f"Lat cible : {lat_target:.5f}°\n"
             f"Lon cible : {lon_target:.5f}°"
         )
-        print(f"[DEBUG] Position caméra : {lat_cam}, {lon_cam}")
-        print(f"[DEBUG] Cap bateau = {heading_boat:.2f}°, bearing caméra = {bearing_cam:.2f}° → absolu = {bearing_abs:.2f}°")
-        print(f"[DEBUG] Élévation = {elevation_cam:.2f}°, d_sol = {d_ground:.2f} m")
-        print(f"[DEBUG] Δlat = {math.degrees(delta_lat):.5f}, Δlon = {math.degrees(delta_lon):.5f}")
-        print(f"[DEBUG] Cible : {lat_target:.5f}, {lon_target:.5f}")
 
     def on_lrf(self, dist_m):
         if dist_m == 0:
@@ -461,7 +561,6 @@ class CameraInterface(QWidget):
         self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        #self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         self.cap.set(cv2.CAP_PROP_FPS, 30)
         self.timer.start(30)
         self.start_btn.setEnabled(False)
