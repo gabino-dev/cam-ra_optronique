@@ -80,6 +80,34 @@ def relative_bearing(camera_lat, camera_lon, target_lat, target_lon, ship_headin
     rel_bearing = (bearing_abs - ship_heading + 360) % 360
     return rel_bearing
 
+def send_camera_as_cog_nmea(camera_bearing, ship_heading, udp_port=10110):
+    cog = (ship_heading + camera_bearing) % 360
+    sog = 4.2  # Example speed over ground
+    now = time.strftime("%H%M%S", time.gmtime())
+    date = time.strftime("%d%m%y", time.gmtime())
+
+    # Helper checksum
+    def nmea_checksum(sentence):
+        cs = 0
+        for c in sentence:
+            cs ^= ord(c)
+        return f"{cs:02X}"
+
+    # GPRMC : $GPRMC,time,status,lat,N/S,lon,E/W,sog,cog,date,,,*cs
+    gprmc_body = f"GPRMC,{now}.000,A,3459.715914,S,13830.130353,E,{sog:.1f},{cog:.1f},{date},,,A"
+    csum = nmea_checksum(gprmc_body)
+    gprmc = f"${gprmc_body}*{csum}\r\n"
+
+    # GPVTG : $GPVTG,cog,T,cog,M,sog,N,xx,K*cs
+    gpvtg_body = f"GPVTG,{cog:.1f},T,{cog:.1f},M,{sog:.1f},N,7.8,K"
+    csum2 = nmea_checksum(gpvtg_body)
+    gpvtg = f"${gpvtg_body}*{csum2}\r\n"
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.sendto(gprmc.encode(), ('127.0.0.1', udp_port))
+    sock.sendto(gpvtg.encode(), ('127.0.0.1', udp_port))
+    sock.close()
+
 class RadarTargetWidget(QWidget):
     def __init__(self, nom, ttm_sentence):
         super().__init__()
@@ -328,11 +356,9 @@ class CompassWidget(QWidget):
         # 4. TRAIT ROUGE (CAMERA) toujours RELIE au CAP du bateau !
         painter.setPen(QPen(QColor(220, 20, 60), 4))
         rad_cam = math.radians((self.heading + self.camera_bearing) % 360)
-        # Trait long (de centre à bord du compas)
         x = center.x() + (radius - 5) * math.sin(rad_cam)
         y = center.y() - (radius - 5) * math.cos(rad_cam)
         painter.drawLine(center, QPoint(int(x), int(y)))
-
 
 class SignalKWidget(QGroupBox):
     def __init__(self):
@@ -597,6 +623,8 @@ class CameraInterface(QWidget):
         self.bear_live.setText(f"Bearing : {bear:.2f} °")
         self.ind_label.setText(f"Cap visé : {bear:.2f} °")
         self.compass_widget.set_camera_bearing(bear)
+        # Envoie la direction caméra comme COG NMEA (pour le trait orange sur Freeboard)
+        send_camera_as_cog_nmea(bear, self.last_head)
         if self.arduino and self.arduino.is_open:
             bearing_int = int(round(bear)) % 360
             now = time.time()
@@ -707,7 +735,7 @@ class CameraInterface(QWidget):
             self.compute_target_latlon()
 
     def start_capture(self):
-        self.cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
+        self.cap = cv2.VideoCapture(2, cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
