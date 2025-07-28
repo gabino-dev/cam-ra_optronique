@@ -15,10 +15,9 @@ from PySide6.QtWidgets import (
     QLineEdit, QGroupBox, QGridLayout, QSizePolicy, QListWidget, QListWidgetItem,
     QMenuBar, QMenu
 )
-from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QUrl
 from PySide6.QtGui import (
-    QPainter, QColor, QPolygon, QFont, QImage, QPixmap, QIcon, QDesktopServices, QPen
+    QPainter, QColor, QPolygon, QFont, QImage, QPixmap, QIcon, QDesktopServices, QPen, QAction
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
@@ -47,7 +46,7 @@ def parse_ttm(ttm_sentence):
         distance_m = distance * 1000
     else:
         distance_m = distance
-    return distance_m, angle
+    return distance_m, angle, fields[7] if len(fields) > 7 else "Target"
 
 def dest_point(lat1, lon1, bearing_deg, distance_m):
     R = 6371000
@@ -81,39 +80,88 @@ def relative_bearing(camera_lat, camera_lon, target_lat, target_lon, ship_headin
     rel_bearing = (bearing_abs - ship_heading + 360) % 360
     return rel_bearing
 
+class RadarTargetWidget(QWidget):
+    def __init__(self, nom, ttm_sentence):
+        super().__init__()
+        self.ttm_sentence = ttm_sentence
+        self.nom = nom
+        h = QHBoxLayout(self)
+        self.lab = QLabel(f"{ttm_sentence[:60]}")
+        self.cibler_btn = QPushButton("Cibler")
+        self.lock_btn = QPushButton("🔒")
+        self.lock_btn.setFixedWidth(35)
+        self.lock_btn.setToolTip("Verrouiller le suivi")
+        self.unlock_btn = QPushButton("🔓")
+        self.unlock_btn.setFixedWidth(35)
+        self.unlock_btn.setToolTip("Déverrouiller le suivi")
+        self.unlock_btn.setEnabled(False)
+        h.addWidget(self.lab)
+        h.addWidget(self.cibler_btn)
+        h.addWidget(self.lock_btn)
+        h.addWidget(self.unlock_btn)
+
 class RadarTTMWidget(QGroupBox):
     ttm_target_selected = Signal(str)
+    ttm_lock_selected = Signal(str)
+    ttm_unlock_selected = Signal(str)
+
     def __init__(self):
         super().__init__("Traces Radar TTM")
         self.list = QListWidget()
         layout = QVBoxLayout(self)
         layout.addWidget(self.list)
         self.setMinimumWidth(410)
-        self.traces = []
+        self.traces = {}  # nom_cible: (ttm_sentence, widget)
+        self.locked_target = None
+
     def add_ttm(self, ttm_sentence):
+        fields = ttm_sentence.strip().split(',')
+        nom = fields[7] if len(fields) > 7 else ttm_sentence
         now = datetime.now().strftime("%H:%M:%S")
-        widget = QWidget()
-        h = QHBoxLayout(widget)
-        lab = QLabel(f"{now} - {ttm_sentence[:60]}")
-        btn = QPushButton("Cibler")
-        h.addWidget(lab)
-        h.addWidget(btn)
-        h.setContentsMargins(0,0,0,0)
+        if nom in self.traces:
+            ttm_old, widget = self.traces[nom]
+            widget.lab.setText(f"{now} - {ttm_sentence[:60]}")
+            widget.ttm_sentence = ttm_sentence
+            return
+        widget = RadarTargetWidget(nom, ttm_sentence)
         item = QListWidgetItem(self.list)
         item.setSizeHint(widget.sizeHint())
         self.list.addItem(item)
         self.list.setItemWidget(item, widget)
-        btn.clicked.connect(lambda _, t=ttm_sentence: self.ttm_target_selected.emit(t))
-        self.traces.append((ttm_sentence, now))
+        self.traces[nom] = (ttm_sentence, widget)
+        widget.cibler_btn.clicked.connect(lambda: self.ttm_target_selected.emit(ttm_sentence))
+        widget.lock_btn.clicked.connect(lambda: self.handle_lock(nom))
+        widget.unlock_btn.clicked.connect(lambda: self.handle_unlock(nom))
+
+    def handle_lock(self, nom):
+        # Déverrouille les autres
+        for n, (_, w) in self.traces.items():
+            w.lock_btn.setEnabled(True)
+            w.unlock_btn.setEnabled(False)
+        if nom in self.traces:
+            _, widget = self.traces[nom]
+            widget.lock_btn.setEnabled(False)
+            widget.unlock_btn.setEnabled(True)
+            self.locked_target = nom
+            self.ttm_lock_selected.emit(widget.ttm_sentence)
+
+    def handle_unlock(self, nom):
+        if nom in self.traces:
+            _, widget = self.traces[nom]
+            widget.lock_btn.setEnabled(True)
+            widget.unlock_btn.setEnabled(False)
+            if self.locked_target == nom:
+                self.locked_target = None
+                self.ttm_unlock_selected.emit(widget.ttm_sentence)
 
 class RadarTTMWindow(QWidget):
-    """Fenêtre popup indépendante pour le radar TTM"""
     def __init__(self, radar_widget):
         super().__init__()
         self.setWindowTitle("Radar TTM")
-        self.setMinimumSize(500, 350)
+        self.resize(600, 300)
         layout = QVBoxLayout(self)
         layout.addWidget(radar_widget)
+        self.setLayout(layout)
 
 class NMEAReader(QThread):
     nmea_update = Signal(str, str, float)
@@ -150,6 +198,7 @@ class NMEAReader(QThread):
                 line = ser.readline().decode(errors='ignore').strip()
                 if not line.startswith('$'):
                     continue
+
                 if self.sock:
                     try:
                         self.sock.sendall((line + "\r\n").encode())
@@ -161,6 +210,7 @@ class NMEAReader(QThread):
                             pass
                         self.sock = None
                         self.connect_tcp()
+
                 if line.startswith('$TTM') or line.startswith('$GPTTM'):
                     self.ttm_trace.emit(line)
                 try:
@@ -233,15 +283,29 @@ class CompassWidget(QWidget):
         size = min(self.width(), self.height())
         center = QPoint(self.width() // 2, self.height() // 2)
         radius = size // 2 - 10
+
+        # Cercle bleu (bateau)
+        painter.setPen(QPen(QColor(50, 120, 255), 5))
+        painter.setBrush(QColor(120, 170, 255, 180))
+        painter.drawEllipse(center, 13, 13)
+
+        # Trait rouge (caméra, lié au bateau)
+        painter.setPen(QPen(QColor(220, 20, 60), 4))
+        rad = math.radians((self.heading + self.camera_bearing) % 360)
+        x = center.x() + (radius - 36) * math.sin(rad)
+        y = center.y() - (radius - 36) * math.cos(rad)
+        painter.drawLine(center, QPoint(int(x), int(y)))
+
+        # Compas
         painter.setPen(Qt.black)
         painter.setBrush(QColor(240, 240, 240))
         painter.drawEllipse(center, radius, radius)
         font = QFont("Arial", 12, QFont.Bold)
         painter.setFont(font)
         for angle, label in zip([0, 90, 180, 270], ["N", "E", "S", "O"]):
-            rad = math.radians(angle)
-            x = center.x() + (radius - 18) * math.sin(rad)
-            y = center.y() - (radius - 18) * math.cos(rad)
+            rad_label = math.radians(angle)
+            x = center.x() + (radius - 18) * math.sin(rad_label)
+            y = center.y() - (radius - 18) * math.cos(rad_label)
             painter.drawText(int(x - 10), int(y + 10), label)
         painter.setPen(QColor(180, 180, 180))
         for a in range(0, 360, 30):
@@ -251,11 +315,8 @@ class CompassWidget(QWidget):
             x2 = center.x() + (radius - 18) * math.sin(rad)
             y2 = center.y() - (radius - 18) * math.cos(rad)
             painter.drawLine(int(x1), int(y1), int(x2), int(y2))
-        painter.setPen(QPen(QColor(220, 20, 60), 4))
-        rad = math.radians(self.camera_bearing)
-        x = center.x() + (radius - 36) * math.sin(rad)
-        y = center.y() - (radius - 36) * math.cos(rad)
-        painter.drawLine(center, QPoint(int(x), int(y)))
+
+        # Triangle cap bateau (bleu)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(50, 100, 255))
         rad = math.radians(self.heading)
@@ -284,16 +345,6 @@ class CameraInterface(QWidget):
         self.setWindowTitle("VIGY - PySide6 Interface")
         self.resize(1600, 900)
 
-        # --- MENU BAR ---
-        self.menubar = QMenuBar(self)
-        self.menu_radar = QMenu("Radar", self)
-        self.action_open_radar = QAction("Ouvrir Radar TTM", self)
-        self.menu_radar.addAction(self.action_open_radar)
-        self.menubar.addMenu(self.menu_radar)
-        self.radar_window = None
-        self.radar_ttm_widget = RadarTTMWidget()
-        self.action_open_radar.triggered.connect(self.show_radar_window)
-
         # --- VIDEO ---
         video_group = QGroupBox("Flux vidéo caméra")
         vg_layout = QVBoxLayout(video_group)
@@ -315,7 +366,7 @@ class CameraInterface(QWidget):
         photo_ctrl.addWidget(self.open_btn)
         vg_layout.addLayout(photo_ctrl)
 
-        # --- AUTRES BLOCS (inchangé) ---
+        # --- AUTRES BLOCS ---
         self.bearing_input = QLineEdit("70")
         self.elev_input = QLineEdit("-10")
         self.result_label = QLabel("")
@@ -389,6 +440,7 @@ class CameraInterface(QWidget):
         col3 = QVBoxLayout()
         col3.addWidget(gps_group)
         bottom_layout.addLayout(col3)
+
         autres_group = QGroupBox("AUTRES OPTIONS")
         autres_group.setLayout(bottom_layout)
         autres_group.setMinimumHeight(330)
@@ -404,11 +456,15 @@ class CameraInterface(QWidget):
         top_layout.addWidget(self.signalk_widget, stretch=1)
         top_layout.addWidget(camera_main_box, stretch=2)
 
-        # --- MAIN LAYOUT avec menubar ---
         main_layout = QVBoxLayout(self)
-        main_layout.setMenuBar(self.menubar)
+        # Ajout menu bar
+        self.menu_bar = QMenuBar()
+        self.radar_action = QAction("Radar TTM")
+        self.menu_bar.addAction(self.radar_action)
+        main_layout.setMenuBar(self.menu_bar)
         main_layout.addLayout(top_layout, stretch=3)
         main_layout.addWidget(autres_group, stretch=2)
+        self.setLayout(main_layout)
 
         # --- INIT DONNEES/THREADS ---
         self.last_elev = 0.0
@@ -441,7 +497,26 @@ class CameraInterface(QWidget):
         self.nmea_thread.ttm_trace.connect(self.on_ttm_trace)
         self.nmea_thread.start()
 
+        # Radar
+        self.radar_ttm_widget = RadarTTMWidget()
+        self.radar_window = RadarTTMWindow(self.radar_ttm_widget)
+        self.radar_window.hide()
+        self.radar_action.triggered.connect(self.show_radar_window)
+        self.auto_target_timer = QTimer(self)
+        self.auto_target_timer.setInterval(500)
+        self.auto_target_timer.timeout.connect(self.cibler_auto)
+        self.locked_sentence = None
         self.radar_ttm_widget.ttm_target_selected.connect(self.cibler_depuis_ttm)
+        self.radar_ttm_widget.ttm_lock_selected.connect(self.start_auto_cibler)
+        self.radar_ttm_widget.ttm_unlock_selected.connect(self.stop_auto_cibler)
+
+        # Bouton simulateur
+        self.sim_btn = QPushButton("Lancer simulateur radar")
+        self.sim_btn.setFixedWidth(210)
+        self.sim_btn.clicked.connect(self.start_radar_sim)
+        main_layout.addWidget(self.sim_btn)
+
+        self.sim_proc = None
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
@@ -452,16 +527,25 @@ class CameraInterface(QWidget):
         self.send_unlock()
 
     def show_radar_window(self):
-        # Créé une nouvelle fenêtre chaque fois (si déjà ouverte, referme et rouvre proprement)
-        if self.radar_window is not None:
-            self.radar_window.close()
-        # On crée un nouveau widget à chaque ouverture pour éviter le "double add"
-        radar_widget = self.radar_ttm_widget
-        self.radar_window = RadarTTMWindow(radar_widget)
         self.radar_window.show()
 
-    # --- Le reste des méthodes est inchangé ---
+    def start_radar_sim(self):
+        import subprocess
+        if self.sim_proc is None:
+            try:
+                self.sim_proc = subprocess.Popen(
+                    [sys.executable, os.path.join(os.path.dirname(__file__), 'radar.py')]
+                )
+                self.sim_btn.setText("Simulateur en cours...")
+                self.sim_btn.setEnabled(False)
+            except Exception as e:
+                print("Erreur lancement simulateur:", e)
+
     def closeEvent(self, event):
+        self.auto_target_timer.stop()
+        if self.sim_proc is not None:
+            self.sim_proc.terminate()
+            self.sim_proc.wait()
         try:
             lsb_e, msb_e = self.deg_to_bytes(0.0, ELEV_FACTOR)
             lsb_b, msb_b = self.deg_to_bytes(360.0, BEAR_FACTOR)
@@ -552,17 +636,30 @@ class CameraInterface(QWidget):
             if self.last_lat_deg is None or self.last_lon_deg is None or self.last_head is None:
                 self.result_label.setText("GPS bateau manquant")
                 return
-            distance_m, angle = parse_ttm(ttm_sentence)
+            distance_m, angle, _ = parse_ttm(ttm_sentence)
             target_lat, target_lon = dest_point(self.last_lat_deg, self.last_lon_deg, angle, distance_m)
             rel_bearing = relative_bearing(
                 self.last_lat_deg, self.last_lon_deg, target_lat, target_lon, self.last_head
             )
-            raw_bearing = int(round((360 - rel_bearing) / BEAR_FACTOR)) & 0xFFFF
-            data = f"0C0000{raw_bearing & 0xFF:02X}{raw_bearing >> 8:02X}"
-            subprocess.call(f"cansend can0 105#{data}", shell=True)
+            lsb_e, msb_e = self.deg_to_bytes(0.0, ELEV_FACTOR)
+            lsb_b, msb_b = self.deg_to_bytes(360 - rel_bearing, BEAR_FACTOR)
+            data = f"0C{lsb_e:02X}{msb_e:02X}{lsb_b:02X}{msb_b:02X}"
+            subprocess.call(f"cansend can0 20C#{data}", shell=True)
             self.result_label.setText(f"Ciblage CAN envoyé: {rel_bearing:.2f}° (data={data})")
         except Exception as e:
             self.result_label.setText(f"Erreur ciblage: {e}")
+
+    def start_auto_cibler(self, ttm_sentence):
+        self.locked_sentence = ttm_sentence
+        self.auto_target_timer.start()
+
+    def stop_auto_cibler(self, ttm_sentence):
+        self.auto_target_timer.stop()
+        self.locked_sentence = None
+
+    def cibler_auto(self):
+        if self.locked_sentence:
+            self.cibler_depuis_ttm(self.locked_sentence)
 
     def compute_target_latlon(self):
         if None in (
@@ -665,7 +762,6 @@ class CameraInterface(QWidget):
         p = os.path.abspath('photos')
         os.makedirs(p, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(p))
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

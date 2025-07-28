@@ -15,10 +15,9 @@ from PySide6.QtWidgets import (
     QLineEdit, QGroupBox, QGridLayout, QSizePolicy, QListWidget, QListWidgetItem,
     QMenuBar, QMenu
 )
-from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QUrl
 from PySide6.QtGui import (
-    QPainter, QColor, QPolygon, QFont, QImage, QPixmap, QIcon, QDesktopServices, QPen
+    QPainter, QColor, QPolygon, QFont, QImage, QPixmap, QIcon, QDesktopServices, QPen, QAction
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
@@ -107,7 +106,6 @@ class RadarTTMWidget(QGroupBox):
         self.traces.append((ttm_sentence, now))
 
 class RadarTTMWindow(QWidget):
-    """Fenêtre popup indépendante pour le radar TTM"""
     def __init__(self, radar_widget):
         super().__init__()
         self.setWindowTitle("Radar TTM")
@@ -218,8 +216,8 @@ class CANReader(QThread):
 class CompassWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.heading = 0.0
-        self.camera_bearing = 0.0
+        self.heading = 0.0  # Cap bateau
+        self.camera_bearing = 0.0  # Azimut caméra
         self.setFixedSize(160, 160)
     def set_heading(self, heading):
         self.heading = heading
@@ -251,11 +249,16 @@ class CompassWidget(QWidget):
             x2 = center.x() + (radius - 18) * math.sin(rad)
             y2 = center.y() - (radius - 18) * math.cos(rad)
             painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        # Trait ROUGE : azimut caméra + heading (toujours relatif au Nord)
         painter.setPen(QPen(QColor(220, 20, 60), 4))
-        rad = math.radians(self.camera_bearing)
+        camera_abs = (self.camera_bearing + self.heading) % 360
+        rad = math.radians(camera_abs)
         x = center.x() + (radius - 36) * math.sin(rad)
         y = center.y() - (radius - 36) * math.cos(rad)
         painter.drawLine(center, QPoint(int(x), int(y)))
+
+        # Triangle BLEU (cap du bateau)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(50, 100, 255))
         rad = math.radians(self.heading)
@@ -452,15 +455,12 @@ class CameraInterface(QWidget):
         self.send_unlock()
 
     def show_radar_window(self):
-        # Créé une nouvelle fenêtre chaque fois (si déjà ouverte, referme et rouvre proprement)
-        if self.radar_window is not None:
+        if hasattr(self, 'radar_window') and self.radar_window is not None:
             self.radar_window.close()
-        # On crée un nouveau widget à chaque ouverture pour éviter le "double add"
         radar_widget = self.radar_ttm_widget
         self.radar_window = RadarTTMWindow(radar_widget)
         self.radar_window.show()
 
-    # --- Le reste des méthodes est inchangé ---
     def closeEvent(self, event):
         try:
             lsb_e, msb_e = self.deg_to_bytes(0.0, ELEV_FACTOR)
@@ -611,7 +611,7 @@ class CameraInterface(QWidget):
             self.compute_target_latlon()
 
     def start_capture(self):
-        self.cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
+        self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
