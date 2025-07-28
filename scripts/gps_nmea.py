@@ -1,3 +1,4 @@
+#!/home/gabin/venvs/pyside-env/bin/python
 import time
 
 # Chemin vers le fichier .nmea

@@ -9,6 +9,7 @@ import serial
 import time
 from datetime import datetime
 
+
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QLineEdit, QGroupBox, QGridLayout, QSizePolicy, QListWidget, QListWidgetItem
@@ -111,7 +112,7 @@ class RadarTTMWidget(QGroupBox):
 class NMEAReader(QThread):
     nmea_update = Signal(str, str, float)
     ttm_trace = Signal(str)
-    def __init__(self, port='/dev/pts/7', baud=4800):
+    def __init__(self, port='/dev/pts/4', baud=4800):
         super().__init__()
         self.port = port
         self.baud = baud
@@ -393,7 +394,7 @@ class CameraInterface(QWidget):
         self.can_thread.update_lrf.connect(self.on_lrf)
         self.can_thread.start()
 
-        self.nmea_thread = NMEAReader(port='/dev/pts/7')
+        self.nmea_thread = NMEAReader(port='/dev/pts/4')
         self.nmea_thread.nmea_update.connect(self.on_nmea_update)
         self.nmea_thread.ttm_trace.connect(self.on_ttm_trace)
         self.nmea_thread.start()
@@ -558,7 +559,7 @@ class CameraInterface(QWidget):
             self.compute_target_latlon()
 
     def start_capture(self):
-        self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+        self.cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_FPS, 30)

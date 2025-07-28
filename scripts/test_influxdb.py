@@ -1,3 +1,4 @@
+#!/home/gabin/venvs/pyside-env/bin/python
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from datetime import datetime

@@ -1,3 +1,4 @@
+#!/home/gabin/venvs/pyside-env/bin/python
 import math
 import serial
 

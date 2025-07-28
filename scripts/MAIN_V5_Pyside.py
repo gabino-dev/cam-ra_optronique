@@ -1,3 +1,4 @@
+#!/home/gabin/venvs/pyside-env/bin/python
 import sys
 import math
 import struct

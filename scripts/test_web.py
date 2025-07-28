@@ -1,3 +1,4 @@
+#!/home/gabin/venvs/pyside-env/bin/python
 import os
 # éviter de charger les libs Snap qui causent le symbol lookup error
 os.environ.pop("LD_LIBRARY_PATH", None)

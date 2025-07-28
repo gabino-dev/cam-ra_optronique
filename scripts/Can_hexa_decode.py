@@ -1,3 +1,4 @@
+#!/home/gabin/venvs/pyside-env/bin/python
 import tkinter as tk
 from tkinter import ttk
 import struct

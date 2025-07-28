@@ -1,3 +1,4 @@
+#!/home/gabin/venvs/pyside-env/bin/python
 import serial
 
 ser = serial.Serial('/dev/pts/7', baudrate=4800, timeout=1)
