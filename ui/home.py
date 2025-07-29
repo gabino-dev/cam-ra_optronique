@@ -81,23 +81,23 @@ class HomePage(QWidget):
         layout.addWidget(QLabel("<h2>Accueil - Vidéo</h2>"))
         # --- HAUT ---
         top_layout = QHBoxLayout()
-        # Bloc Freeboard
+        # Bloc Freeboard (à droite, taille fixe)
         self.signalk_widget = QWebEngineView()
         self.signalk_widget.setUrl(QUrl("http://localhost:3000/@signalk/freeboard-sk/"))
         self.signalk_widget.setMinimumSize(420, 350)
-        top_layout.addWidget(self.signalk_widget, stretch=1)
-        # Bloc vidéo (refonte)
-        video_col = QVBoxLayout()
-        video_group = QGroupBox("Flux vidéo caméra")
-        video_group.setStyleSheet("QGroupBox { margin-top: 18px; font-size: 18px; }")
-        vg_layout = QVBoxLayout(video_group)
+        self.signalk_widget.setMaximumHeight(400)
+        # Bloc caméra (vidéo + boutons à droite)
+        camera_group = QGroupBox("Flux vidéo caméra")
+        camera_group.setStyleSheet("QGroupBox { margin-top: 18px; font-size: 18px; }")
+        cam_layout = QHBoxLayout(camera_group)
+        # Vidéo à gauche
         self.video_label = QLabel("Flux en cours...")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setMinimumSize(800, 480)
-        self.video_label.setStyleSheet("background: #e0e0e0; border-radius: 8px; margin: 8px;")
-        vg_layout.addWidget(self.video_label, alignment=Qt.AlignCenter)
-        # Boutons sous la vidéo
-        btn_row = QHBoxLayout()
+        self.video_label.setMinimumSize(320, 240)
+        self.video_label.setStyleSheet("background: #000; border-radius: 4px; margin: 0px;")
+        cam_layout.addWidget(self.video_label, stretch=2)
+        # Colonne boutons à droite
+        btn_col = QVBoxLayout()
         self.start_btn = QPushButton("▶️ Démarrer Vidéo")
         self.stop_btn = QPushButton("⏹️ Arrêter Vidéo")
         self.stop_btn.setEnabled(False)
@@ -105,11 +105,13 @@ class HomePage(QWidget):
         self.open_btn = QPushButton("🗂️ Ouvrir Dossier Photos")
         for btn in [self.start_btn, self.stop_btn, self.photo_btn, self.open_btn]:
             btn.setMinimumHeight(38)
-            btn.setStyleSheet("font-size: 16px; padding: 0 18px;")
-            btn_row.addWidget(btn)
-        vg_layout.addLayout(btn_row)
-        video_col.addWidget(video_group)
-        top_layout.addLayout(video_col, stretch=2)
+            btn.setStyleSheet("font-size: 16px; padding: 0 18px; margin-bottom: 12px;")
+            btn_col.addWidget(btn)
+        btn_col.addStretch()
+        cam_layout.addLayout(btn_col, stretch=1)
+        # Layout principal du haut
+        top_layout.addWidget(camera_group, stretch=3)
+        top_layout.addWidget(self.signalk_widget, stretch=2)
         layout.addLayout(top_layout)
         # --- INFOS LIVE ---
         info_group = QGroupBox("Infos Live")
@@ -214,7 +216,7 @@ class HomePage(QWidget):
             h, w, ch = img.shape
             qimg = QImage(img.data, w, h, ch*w, QImage.Format_RGB888)
             self.video_label.setPixmap(QPixmap.fromImage(qimg).scaled(
-                self.video_label.size(), Qt.KeepAspectRatio))
+                self.video_label.width(), self.video_label.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         except StopIteration:
             pass
         except Exception as e:
@@ -229,21 +231,39 @@ class HomePage(QWidget):
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
     def take_photo(self):
-        if hasattr(self, 'cap') and self.cap.isOpened():
-            ret, frm = self.cap.read()
-            if not ret: return
+        try:
+            # Capture une frame PyAV
+            frame = next(self.frame_iter)
+            img = frame.to_ndarray(format='bgr24')
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
             fld = os.path.join('photos', f'photo_{ts}')
             os.makedirs(fld, exist_ok=True)
-            cv2.imwrite(os.path.join(fld, f'{ts}.jpg'), frm)
+            cv2.imwrite(os.path.join(fld, f'{ts}.jpg'), img)
             info = os.path.join(fld, 'info.txt')
+            rel_bearing = (self.last_bear - self.last_head) % 360 if self.last_head is not None else None
             with open(info, 'w') as f:
                 f.write(f"Timestamp: {ts}\n")
                 f.write(f"Élévation: {self.last_elev:.2f} °\n")
                 f.write(f"Bearing: {self.last_bear:.2f} °\n")
+                f.write(f"Cap bateau: {self.last_head:.2f} °\n")
+                if rel_bearing is not None:
+                    f.write(f"Bearing relatif: {rel_bearing:.2f} °\n")
                 f.write(f"Lat bateau: {self.last_lat}\n")
                 f.write(f"Lon bateau: {self.last_lon}\n")
+                if hasattr(self, 'target_lat') and hasattr(self, 'target_lon') and self.target_lat and self.target_lon:
+                    f.write(f"Lat cible: {self.target_lat:.5f}°\n")
+                    f.write(f"Lon cible: {self.target_lon:.5f}°\n")
             self.result_label.setText(f"Info saved in {fld}")
+            # Rafraîchir la galerie si elle existe
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'pages'):
+                main_window = main_window.parent()
+            if main_window and hasattr(main_window, 'pages'):
+                gallery_page = main_window.pages.widget(2)
+                if hasattr(gallery_page, 'refresh_gallery'):
+                    gallery_page.refresh_gallery()
+        except Exception as e:
+            self.result_label.setText(f"Erreur capture photo: {e}")
     def open_photos(self):
         p = os.path.abspath('photos')
         os.makedirs(p, exist_ok=True)

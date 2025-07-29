@@ -1,0 +1,7 @@
+Timestamp: 20250729_115423
+Élévation: 0.00 °
+Bearing: 0.01 °
+Cap bateau: 38.70 °
+Bearing relatif: 321.31 °
+Lat bateau: -34.99663° S
+Lon bateau: 138.55334° E

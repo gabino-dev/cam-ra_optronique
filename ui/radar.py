@@ -90,24 +90,24 @@ class RadarPage(QWidget):
         self.nmea_thread = nmea_thread
         self.get_boat_info = get_boat_info
         self.send_can_ciblage = send_can_ciblage
-        layout = QVBoxLayout(self)
-        # --- HAUT : Freeboard + Boussole ---
-        top_layout = QHBoxLayout()
+        main_layout = QHBoxLayout(self)
+        # Freeboard à gauche (2/3)
         self.signalk_widget = QWebEngineView()
         self.signalk_widget.setUrl(QUrl("http://localhost:3000/@signalk/freeboard-sk/"))
-        self.signalk_widget.setMinimumSize(420, 350)
-        top_layout.addWidget(self.signalk_widget, stretch=1)
+        self.signalk_widget.setMinimumSize(600, 500)
+        main_layout.addWidget(self.signalk_widget, stretch=2)
+        # Colonne de droite (1/3) : boussole en haut, radar_ttm_widget en dessous
+        right_col = QVBoxLayout()
         self.compass_widget = CompassWidget()
-        top_layout.addWidget(self.compass_widget, stretch=0)
-        layout.addLayout(top_layout)
-        # --- RADAR ---
-        layout.addWidget(QLabel("<h2>Radar</h2>"))
+        self.compass_widget.setFixedSize(180, 180)
+        right_col.addWidget(self.compass_widget, alignment=Qt.AlignTop | Qt.AlignHCenter)
         self.radar_ttm_widget = RadarTTMWidget()
-        layout.addWidget(self.radar_ttm_widget)
+        right_col.addWidget(self.radar_ttm_widget, stretch=1)
+        main_layout.addLayout(right_col, stretch=1)
         self.sim_btn = QPushButton("Lancer simulateur radar")
         self.sim_btn.setFixedWidth(210)
         self.sim_btn.clicked.connect(self.start_radar_sim)
-        layout.addWidget(self.sim_btn)
+        right_col.addWidget(self.sim_btn, alignment=Qt.AlignLeft)
         self.sim_proc = None
         self.auto_target_timer = QTimer(self)
         self.auto_target_timer.setInterval(500)
