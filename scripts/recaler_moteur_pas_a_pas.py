@@ -10,7 +10,7 @@ BAUDRATE = 9600
 
 
 # Nouvelle position : on décale de -1°, et on reste dans [0, 359]
-new_position = 2
+new_position = 358
 
 try:
     ser = serial.Serial(PORT, BAUDRATE, timeout=1)

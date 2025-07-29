@@ -1,0 +1,8 @@
+QWidget { font-family: 'Segoe UI', Arial, sans-serif; font-size: 15px; }
+QListWidget { background: #23272e; color: #fff; border: none; }
+QListWidget::item { height: 48px; padding-left: 18px; }
+QListWidget::item:selected { background: #0078d7; color: #fff; border-radius: 8px; }
+QGroupBox { border-radius: 8px; border: 1px solid #444; margin-top: 10px; }
+QPushButton { border-radius: 6px; padding: 8px 18px; background: #0078d7; color: #fff; font-weight: bold; }
+QPushButton:hover { background: #005fa3; }
+QLabel { color: #222; } 
