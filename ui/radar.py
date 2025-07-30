@@ -10,21 +10,41 @@ from PySide6.QtCore import QUrl
 class RadarTargetWidget(QWidget):
     def __init__(self, nom, ttm_sentence):
         super().__init__()
-        h = QHBoxLayout(self)
-        self.lab = QLabel(f"{ttm_sentence[:60]}")
-        self.lab.setStyleSheet("color: #fff;")
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(4)
+        
+        # Texte TTM en haut
+        self.lab = QLabel(f"{ttm_sentence}")
+        self.lab.setStyleSheet("color: #fff; font-size: 11px; font-family: monospace; background: #2a2a2a; padding: 4px; border-radius: 3px;")
+        self.lab.setWordWrap(True)
+        main_layout.addWidget(self.lab)
+        
+        # Boutons en dessous
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(6)
+        
         self.cibler_btn = QPushButton("🎯 Cibler")
+        self.cibler_btn.setFixedSize(80, 28)
+        self.cibler_btn.setStyleSheet("QPushButton { background: #0078d7; color: white; border-radius: 4px; font-weight: bold; font-size: 10px; }")
+        
         self.lock_btn = QPushButton("🔒 Lock")
-        self.lock_btn.setFixedWidth(70)
+        self.lock_btn.setFixedSize(70, 28)
         self.lock_btn.setToolTip("Verrouiller le suivi (🔒)")
+        self.lock_btn.setStyleSheet("QPushButton { background: #28a745; color: white; border-radius: 4px; font-weight: bold; font-size: 10px; }")
+        
         self.unlock_btn = QPushButton("🔓 Unlock")
-        self.unlock_btn.setFixedWidth(70)
+        self.unlock_btn.setFixedSize(85, 28)
         self.unlock_btn.setToolTip("Déverrouiller le suivi (🔓)")
         self.unlock_btn.setEnabled(False)
-        h.addWidget(self.lab)
-        h.addWidget(self.cibler_btn)
-        h.addWidget(self.lock_btn)
-        h.addWidget(self.unlock_btn)
+        self.unlock_btn.setStyleSheet("QPushButton { background: #dc3545; color: white; border-radius: 4px; font-weight: bold; font-size: 10px; }")
+        
+        btn_layout.addWidget(self.cibler_btn)
+        btn_layout.addWidget(self.lock_btn)
+        btn_layout.addWidget(self.unlock_btn)
+        btn_layout.addStretch()
+        
+        main_layout.addLayout(btn_layout)
+        self.setMinimumHeight(60)
 
 class RadarTTMWidget(QGroupBox):
     ttm_target_selected = Signal(str)
@@ -35,7 +55,8 @@ class RadarTTMWidget(QGroupBox):
         self.list = QListWidget()
         layout = QVBoxLayout(self)
         layout.addWidget(self.list)
-        self.setMinimumWidth(410)
+        self.setMinimumWidth(520)
+        self.setMinimumHeight(300)
         self.traces = {}
         self.locked_target = None
     def add_ttm(self, ttm_sentence):
@@ -105,7 +126,7 @@ class RadarPage(QWidget):
         right_col.addWidget(self.radar_ttm_widget, stretch=1)
         main_layout.addLayout(right_col, stretch=1)
         self.sim_btn = QPushButton("Lancer simulateur radar")
-        self.sim_btn.setFixedWidth(210)
+        self.sim_btn.setFixedWidth(250)
         self.sim_btn.clicked.connect(self.start_radar_sim)
         right_col.addWidget(self.sim_btn, alignment=Qt.AlignLeft)
         self.sim_proc = None

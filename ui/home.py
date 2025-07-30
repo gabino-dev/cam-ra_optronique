@@ -78,64 +78,162 @@ class HomePage(QWidget):
         self.can_thread = can_thread
         self.nmea_thread = nmea_thread
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<h2>Accueil - Vidéo</h2>"))
-        # --- HAUT ---
-        top_layout = QHBoxLayout()
-        # Bloc Freeboard (à droite, taille fixe)
-        self.signalk_widget = QWebEngineView()
-        self.signalk_widget.setUrl(QUrl("http://localhost:3000/@signalk/freeboard-sk/"))
-        self.signalk_widget.setMinimumSize(420, 350)
-        self.signalk_widget.setMaximumHeight(400)
-        # Bloc caméra (vidéo + boutons à droite)
-        camera_group = QGroupBox("Flux vidéo caméra")
-        camera_group.setStyleSheet("QGroupBox { margin-top: 18px; font-size: 18px; }")
+        layout.setSpacing(15)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Titre avec meilleur contraste
+        title = QLabel("<h2 style='color: #ffffff; background: #1a365d; padding: 15px; border-radius: 10px; margin: 0; border: 2px solid #3182ce;'>🎥 Accueil - Contrôle Caméra</h2>")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        
+        # --- LAYOUT PRINCIPAL : Caméra à gauche (2/3), Freeboard à droite (1/3) ---
+        main_layout = QHBoxLayout()
+        main_layout.setSpacing(20)
+        
+        # --- COLONNE GAUCHE (2/3) : Caméra et contrôles ---
+        left_col = QVBoxLayout()
+        left_col.setSpacing(15)
+        
+        # Bloc caméra avec meilleur style
+        camera_group = QGroupBox("📹 Flux vidéo caméra")
+        camera_group.setStyleSheet("""
+            QGroupBox { 
+                font-size: 18px; font-weight: bold; color: #ffffff;
+                background: #2d3748; border: 3px solid #3182ce; border-radius: 10px;
+                margin-top: 25px; padding-top: 15px; padding-bottom: 15px;
+            }
+            QGroupBox::title { 
+                subcontrol-origin: margin; left: 15px; padding: 0 12px 0 12px; 
+                background: #3182ce; color: white; border-radius: 6px;
+                font-size: 16px; font-weight: bold;
+            }
+        """)
         cam_layout = QHBoxLayout(camera_group)
-        # Vidéo à gauche
+        cam_layout.setSpacing(15)
+        
+        # Vidéo à gauche avec meilleur contraste
         self.video_label = QLabel("Flux en cours...")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setMinimumSize(320, 240)
-        self.video_label.setStyleSheet("background: #000; border-radius: 4px; margin: 0px;")
+        self.video_label.setMinimumSize(480, 420)
+        self.video_label.setStyleSheet("""
+            background: #1a202c; border: 3px solid #4a5568; border-radius: 8px; 
+            color: #e2e8f0; font-size: 16px; font-weight: bold; padding: 20px;
+        """)
         cam_layout.addWidget(self.video_label, stretch=2)
-        # Colonne boutons à droite
+        
+        # Colonne boutons à droite avec meilleur style
         btn_col = QVBoxLayout()
+        btn_col.setSpacing(12)
+        
         self.start_btn = QPushButton("▶️ Démarrer Vidéo")
         self.stop_btn = QPushButton("⏹️ Arrêter Vidéo")
         self.stop_btn.setEnabled(False)
         self.photo_btn = QPushButton("📸 Prendre Photo")
         self.open_btn = QPushButton("🗂️ Ouvrir Dossier Photos")
+        
         for btn in [self.start_btn, self.stop_btn, self.photo_btn, self.open_btn]:
-            btn.setMinimumHeight(38)
-            btn.setStyleSheet("font-size: 16px; padding: 0 18px; margin-bottom: 12px;")
+            btn.setMinimumHeight(50)
+            btn.setStyleSheet("""
+                QPushButton { 
+                    font-size: 15px; font-weight: bold; padding: 10px 20px;
+                    background: #3182ce; color: white; border: 2px solid #2c5aa0; border-radius: 8px;
+                    margin-bottom: 10px;
+                }
+                QPushButton:hover { background: #2c5aa0; border: 2px solid #1e40af; }
+                QPushButton:disabled { background: #4a5568; color: #a0aec0; border: 2px solid #2d3748; }
+            """)
             btn_col.addWidget(btn)
         btn_col.addStretch()
         cam_layout.addLayout(btn_col, stretch=1)
-        # Layout principal du haut
-        top_layout.addWidget(camera_group, stretch=3)
-        top_layout.addWidget(self.signalk_widget, stretch=2)
-        layout.addLayout(top_layout)
-        # --- INFOS LIVE ---
-        info_group = QGroupBox("Infos Live")
+        
+        left_col.addWidget(camera_group)
+        
+        # --- INFOS LIVE avec meilleur contraste ---
+        info_group = QGroupBox("📊 Infos Live")
+        info_group.setStyleSheet("""
+            QGroupBox { 
+                font-size: 18px; font-weight: bold; color: #ffffff;
+                background: #2d3748; border: 3px solid #38a169; border-radius: 10px;
+                margin-top: 25px; padding-top: 15px; padding-bottom: 15px;
+            }
+            QGroupBox::title { 
+                subcontrol-origin: margin; left: 15px; padding: 0 12px 0 12px; 
+                background: #38a169; color: white; border-radius: 6px;
+                font-size: 16px; font-weight: bold;
+            }
+        """)
         info_layout = QGridLayout(info_group)
+        info_layout.setSpacing(12)
+        
         self.elev_live = QLabel("Élévation : 0.00 °")
         self.bear_live = QLabel("Bearing : 0.00 °")
         self.cap_live = QLabel("Cap visé : -- °")
         self.gps_label = QLabel("Lat : --\nLon : --\nCap : --")
+        
+        # Style pour les labels d'info
+        for label in [self.elev_live, self.bear_live, self.cap_live, self.gps_label]:
+            label.setStyleSheet("""
+                color: #f7fafc; font-size: 14px; font-weight: bold;
+                background: #1a202c; padding: 12px; border-radius: 6px;
+                border: 2px solid #4a5568;
+            """)
+        
         info_layout.addWidget(self.elev_live, 0, 0)
         info_layout.addWidget(self.bear_live, 0, 1)
         info_layout.addWidget(self.cap_live, 1, 0)
         info_layout.addWidget(self.gps_label, 1, 1)
+        
         self.compass_widget = CompassWidget()
         info_layout.addWidget(self.compass_widget, 0, 2, 2, 1)
-        layout.addWidget(info_group)
-        # --- COMMANDES CAN ---
-        can_group = QGroupBox("Envoi CAN (0x20C)")
+        
+        left_col.addWidget(info_group)
+        
+        # --- COMMANDES CAN avec meilleur style ---
+        can_group = QGroupBox("🎯 Envoi CAN (0x20C)")
+        can_group.setStyleSheet("""
+            QGroupBox { 
+                font-size: 18px; font-weight: bold; color: #ffffff;
+                background: #2d3748; border: 3px solid #805ad5; border-radius: 10px;
+                margin-top: 25px; padding-top: 15px; padding-bottom: 15px;
+            }
+            QGroupBox::title { 
+                subcontrol-origin: margin; left: 15px; padding: 0 12px 0 12px; 
+                background: #805ad5; color: white; border-radius: 6px;
+                font-size: 16px; font-weight: bold;
+            }
+        """)
         can_layout = QGridLayout(can_group)
+        can_layout.setSpacing(10)
+        
         from PySide6.QtWidgets import QLineEdit
         self.bearing_input = QLineEdit("70")
         self.elev_input = QLineEdit("-10")
         self.result_label = QLabel("")
-        send_btn = QPushButton("Envoyer")
-        unlock_btn = QPushButton("Unlock")
+        
+        # Style pour les inputs
+        for input_widget in [self.bearing_input, self.elev_input]:
+            input_widget.setStyleSheet("""
+                QLineEdit { 
+                    background: #1a202c; color: #e2e8f0; border: 2px solid #4a5568;
+                    border-radius: 6px; padding: 8px; font-size: 14px; font-weight: bold;
+                }
+                QLineEdit:focus { border: 3px solid #3182ce; background: #2d3748; }
+            """)
+        
+        self.result_label.setStyleSheet("color: #f7fafc; font-size: 13px; padding: 8px; background: #1a202c; border-radius: 4px;")
+        
+        send_btn = QPushButton("🚀 Envoyer")
+        unlock_btn = QPushButton("🔓 Unlock")
+        
+        for btn in [send_btn, unlock_btn]:
+            btn.setStyleSheet("""
+                QPushButton { 
+                    background: #38a169; color: white; border: 2px solid #2f855a; border-radius: 6px;
+                    padding: 10px 20px; font-weight: bold; font-size: 14px;
+                }
+                QPushButton:hover { background: #2f855a; border: 2px solid #276749; }
+            """)
+        
         can_layout.addWidget(QLabel("Bearing (°):"), 0, 0)
         can_layout.addWidget(self.bearing_input, 0, 1)
         can_layout.addWidget(QLabel("Elevation (°):"), 1, 0)
@@ -143,29 +241,99 @@ class HomePage(QWidget):
         can_layout.addWidget(send_btn, 2, 0, 1, 2)
         can_layout.addWidget(unlock_btn, 3, 0, 1, 2)
         can_layout.addWidget(self.result_label, 4, 0, 1, 2)
-        layout.addWidget(can_group)
-        # --- ZOOM FOV ---
-        zoom_group = QGroupBox("Zoom FoV (0x202)")
-        zg_layout = QHBoxLayout(zoom_group)
+        
+        # Style pour les labels CAN
+        for i in range(can_layout.rowCount()):
+            item = can_layout.itemAtPosition(i, 0)
+            if item and item.widget() and isinstance(item.widget(), QLabel):
+                item.widget().setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold;")
+        
+        # --- ZOOM FOV avec meilleur style ---
+        zoom_group = QGroupBox("🔍 Zoom FoV (0x202)")
+        zoom_group.setStyleSheet("""
+            QGroupBox { 
+                font-size: 18px; font-weight: bold; color: #ffffff;
+                background: #2d3748; border: 3px solid #d69e2e; border-radius: 10px;
+                margin-top: 25px; padding-top: 15px; padding-bottom: 15px;
+            }
+            QGroupBox::title { 
+                subcontrol-origin: margin; left: 15px; padding: 0 12px 0 12px; 
+                background: #d69e2e; color: white; border-radius: 6px;
+                font-size: 16px; font-weight: bold;
+            }
+        """)
+        zg_layout = QVBoxLayout(zoom_group)
+        zg_layout.setSpacing(12)
+        
         for code, label in FOV_MAP.items():
             btn = QPushButton(label)
             btn.clicked.connect(lambda _, c=code: self.send_fov_zoom(c))
+            btn.setMinimumHeight(45)
+            btn.setStyleSheet("""
+                QPushButton { 
+                    background: #d69e2e; color: white; border: 2px solid #b7791f; border-radius: 8px;
+                    padding: 12px 20px; font-weight: bold; font-size: 15px;
+                }
+                QPushButton:hover { background: #b7791f; border: 2px solid #975a16; }
+            """)
             zg_layout.addWidget(btn)
-        self.zoom_lbl = QLabel("")
-        zg_layout.addWidget(self.zoom_lbl)
-        layout.addWidget(zoom_group)
-        # --- LRF ---
-        lrf_group = QGroupBox("Télémètre Laser")
+        
+        # --- LRF avec meilleur style ---
+        lrf_group = QGroupBox("🎯 Télémètre Laser")
+        lrf_group.setStyleSheet("""
+            QGroupBox { 
+                font-size: 18px; font-weight: bold; color: #ffffff;
+                background: #2d3748; border: 3px solid #e53e3e; border-radius: 10px;
+                margin-top: 25px; padding-top: 15px; padding-bottom: 15px;
+            }
+            QGroupBox::title { 
+                subcontrol-origin: margin; left: 15px; padding: 0 12px 0 12px; 
+                background: #e53e3e; color: white; border-radius: 6px;
+                font-size: 16px; font-weight: bold;
+            }
+        """)
         lrf_layout = QHBoxLayout(lrf_group)
-        lrf_btn = QPushButton("LRF \U0001F52B")
-        lrf_btn.setFixedWidth(100)
+        lrf_layout.setSpacing(12)
+        
+        lrf_btn = QPushButton("LRF 🔥")
+        lrf_btn.setFixedWidth(130)
         lrf_btn.clicked.connect(self.send_lrf)
+        lrf_btn.setStyleSheet("""
+            QPushButton { 
+                background: #e53e3e; color: white; border: 2px solid #c53030; border-radius: 6px;
+                padding: 10px 20px; font-weight: bold; font-size: 14px;
+            }
+            QPushButton:hover { background: #c53030; border: 2px solid #9b2c2c; }
+        """)
+        
         self.lrf_label = QLabel("-- m")
-        self.lrf_label.setFont(QFont("Arial", 14, QFont.Bold))
+        self.lrf_label.setFont(QFont("Arial", 16, QFont.Bold))
+        self.lrf_label.setStyleSheet("color: #f7fafc; background: #1a202c; padding: 12px; border-radius: 6px; border: 2px solid #4a5568;")
+        
         lrf_layout.addWidget(lrf_btn)
         lrf_layout.addWidget(self.lrf_label)
-        layout.addWidget(lrf_group)
-        layout.addStretch()
+        lrf_layout.addStretch()
+        
+        # --- LAYOUT HORIZONTAL pour CAN, ZOOM et LRF ---
+        controls_layout = QHBoxLayout()
+        controls_layout.addWidget(can_group, stretch=1)
+        controls_layout.addWidget(zoom_group, stretch=1)
+        controls_layout.addWidget(lrf_group, stretch=1)
+        left_col.addLayout(controls_layout)
+        left_col.addStretch()
+        
+        # --- COLONNE DROITE (1/3) : Freeboard ---
+        self.signalk_widget = QWebEngineView()
+        self.signalk_widget.setUrl(QUrl("http://localhost:3000/@signalk/freeboard-sk/"))
+        self.signalk_widget.setMinimumSize(400, 600)
+        self.signalk_widget.setStyleSheet("border: 3px solid #4a5568; border-radius: 10px;")
+        
+        # Layout principal
+        main_layout.addLayout(left_col, stretch=2)
+        main_layout.addWidget(self.signalk_widget, stretch=1)
+        
+        layout.addLayout(main_layout)
+        
         # --- LOGIQUE ---
         self.last_elev = 0.0
         self.last_bear = 0.0
@@ -178,18 +346,21 @@ class HomePage(QWidget):
         self.cap_live.setText(f"Cap visé : -- °")
         self.last_sent_angle = None
         self.last_sent_time = time.time()
+        
         # Connexion Arduino
         try:
             self.arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
             time.sleep(2)
         except:
             self.arduino = None
+        
         # Connexion signaux
         self.can_thread.update_data.connect(self.on_position)
         self.can_thread.update_digital_zoom.connect(self.on_digital_zoom)
         self.can_thread.update_lrf.connect(self.on_lrf)
         self.nmea_thread.nmea_update.connect(self.on_nmea_update)
         self.nmea_thread.ttm_trace.connect(self.on_ttm_trace)
+        
         # Vidéo
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
