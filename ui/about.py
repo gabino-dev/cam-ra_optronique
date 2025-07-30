@@ -5,5 +5,5 @@ class AboutPage(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<h2>À propos</h2>"))
-        layout.addWidget(QLabel("VIGY - Version 2.0<br>© 2024 Gabin Laussu"))
+        layout.addWidget(QLabel("VIGY - Version 2.0<br>© 2025 Gabin Laussu"))
         layout.addStretch() 

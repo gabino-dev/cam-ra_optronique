@@ -114,7 +114,7 @@ class HomePage(QWidget):
         # Vidéo à gauche avec meilleur contraste
         self.video_label = QLabel("Flux en cours...")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setMinimumSize(480, 420)
+        self.video_label.setMinimumSize(350, 280)
         self.video_label.setStyleSheet("""
             background: #1a202c; border: 3px solid #4a5568; border-radius: 8px; 
             color: #e2e8f0; font-size: 16px; font-weight: bold; padding: 20px;
@@ -153,12 +153,12 @@ class HomePage(QWidget):
         info_group.setStyleSheet("""
             QGroupBox { 
                 font-size: 18px; font-weight: bold; color: #ffffff;
-                background: #2d3748; border: 3px solid #38a169; border-radius: 10px;
+                background: #2d3748; border: 3px solid #805ad5; border-radius: 10px;
                 margin-top: 25px; padding-top: 15px; padding-bottom: 15px;
             }
             QGroupBox::title { 
                 subcontrol-origin: margin; left: 15px; padding: 0 12px 0 12px; 
-                background: #38a169; color: white; border-radius: 6px;
+                background: #805ad5; color: white; border-radius: 6px;
                 font-size: 16px; font-weight: bold;
             }
         """)
@@ -193,12 +193,12 @@ class HomePage(QWidget):
         can_group.setStyleSheet("""
             QGroupBox { 
                 font-size: 18px; font-weight: bold; color: #ffffff;
-                background: #2d3748; border: 3px solid #805ad5; border-radius: 10px;
+                background: #2d3748; border: 3px solid #38a169; border-radius: 10px;
                 margin-top: 25px; padding-top: 15px; padding-bottom: 15px;
             }
             QGroupBox::title { 
                 subcontrol-origin: margin; left: 15px; padding: 0 12px 0 12px; 
-                background: #805ad5; color: white; border-radius: 6px;
+                background: #38a169; color: white; border-radius: 6px;
                 font-size: 16px; font-weight: bold;
             }
         """)
