@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QGroupBox, QGridLayout
-from PySide6.QtCore import Qt, QTimer, QUrl, QPoint
+from PySide6.QtCore import Qt, QTimer, QUrl, QPoint, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap, QFont, QDesktopServices, QPainter, QColor, QPolygon, QPen
 import cv2
 import os
@@ -10,6 +10,10 @@ import serial
 import math
 from PySide6.QtWebEngineWidgets import QWebEngineView
 import av
+import asyncio
+import websockets
+import json
+import threading
 
 class CompassWidget(QWidget):
     def __init__(self):
@@ -71,6 +75,56 @@ class CompassWidget(QWidget):
         x = center.x() + (radius - 5) * math.sin(rad_cam)
         y = center.y() - (radius - 5) * math.cos(rad_cam)
         painter.drawLine(center, QPoint(int(x), int(y)))
+
+class WebSocketServer(QThread):
+    def __init__(self):
+        super().__init__()
+        self.camera_bearing = 0.0  # Bearing absolu de la caméra
+        self.camera_angle = 40.5  # VWFOV par défaut
+        self.running = True
+        
+    def update_bearing(self, bearing):
+        self.camera_bearing = bearing  # Bearing absolu de la caméra
+        print(f"[DEBUG WS] Bearing caméra mis à jour: {bearing:.2f}°")
+        
+    def update_camera_angle(self, zoom_type):
+        if zoom_type == "VWFOV":
+            self.camera_angle = 40.5
+        elif zoom_type == "WFOV":
+            self.camera_angle = 11.5
+        elif zoom_type == "NFOV":
+            self.camera_angle = 2.5
+        print(f"[DEBUG WS] Angle caméra mis à jour: {zoom_type} = {self.camera_angle}°")
+        
+    def run(self):
+        asyncio.run(self.websocket_server())
+        
+    async def websocket_server(self):
+        async def send_data(websocket):
+            while self.running:
+                data = {
+                    "camera_bearing": self.camera_bearing,  # Bearing absolu de la caméra
+                    "camera_angle": self.camera_angle
+                }
+                await websocket.send(json.dumps(data))
+                print(f"[DEBUG WS SEND] Données envoyées: {data}")
+                await asyncio.sleep(0.1)
+
+        async def handler(websocket):
+            print("[WS SERVER] Client connecté ✅")
+            try:
+                await send_data(websocket)
+            except websockets.ConnectionClosed:
+                print("[WS SERVER] Client déconnecté ❌")
+
+        async with websockets.serve(handler, "localhost", 8765):
+            print("[WS SERVER] Serveur WebSocket en écoute sur ws://localhost:8765")
+            while self.running:
+                await asyncio.sleep(1)
+                
+    def stop(self):
+        self.running = False
+        self.wait()
 
 class HomePage(QWidget):
     def __init__(self, can_thread, nmea_thread):
@@ -370,6 +424,19 @@ class HomePage(QWidget):
         self.open_btn.clicked.connect(self.open_photos)
         send_btn.clicked.connect(self.send_can)
         unlock_btn.clicked.connect(self.send_unlock)
+
+        # WebSocket Server
+        self.ws_server = WebSocketServer()
+        self.ws_server.start()
+        
+    def closeEvent(self, event):
+        # Arrêter le serveur WebSocket
+        if hasattr(self, 'ws_server'):
+            self.ws_server.stop()
+        # Arrêter la capture vidéo
+        self.stop_capture()
+        event.accept()
+        
     def start_capture(self):
         # Capture H264 natif via PyAV
         self.container = av.open('/dev/video3', format='v4l2', options={'input_format': 'h264'})
@@ -457,11 +524,27 @@ class HomePage(QWidget):
         import subprocess
         subprocess.call("cansend can0 205#00", shell=True)
     def send_fov_zoom(self, code):
+        print(f"[DEBUG ZOOM] === MÉTHODE send_fov_zoom APPELÉE avec code: 0x{code:02X} ===")
         import subprocess
+        print(f"[DEBUG ZOOM] Bouton zoom cliqué avec code: 0x{code:02X}")
         db = [0x00, code] + [0x00]*6
         d = ''.join(f"{byte:02X}" for byte in db)
         subprocess.call(f"cansend can0 202#{d}", shell=True)
-        self.zoom_lbl.setText(f"FoV: {FOV_MAP.get(code,'')}")
+        print(f"[DEBUG ZOOM] Trame CAN envoyée: 202#{d}")
+        
+        # Envoyer l'angle de la caméra via WebSocket
+        if hasattr(self, 'ws_server'):
+            if code == 0x04:  # VWFOV
+                print("[DEBUG ZOOM] Envoi VWFOV (40.5°)")
+                self.ws_server.update_camera_angle("VWFOV")
+            elif code == 0x08:  # WFOV
+                print("[DEBUG ZOOM] Envoi WFOV (11.5°)")
+                self.ws_server.update_camera_angle("WFOV")
+            elif code == 0x0C:  # NFOV
+                print("[DEBUG ZOOM] Envoi NFOV (2.5°)")
+                self.ws_server.update_camera_angle("NFOV")
+        else:
+            print("[DEBUG ZOOM] ERREUR: ws_server non disponible")
     def send_lrf(self):
         import subprocess
         subprocess.call("cansend can0 202#0000000000004000", shell=True)
@@ -472,6 +555,18 @@ class HomePage(QWidget):
         self.cap_live.setText(f"Cap visé : {bear:.2f} °")
         send_camera_as_cog_nmea(bear, self.last_head)
         self.compass_widget.set_camera_bearing(bear)
+        
+        # Calculer le bearing relatif (différence entre bearing caméra et cap bateau)
+        rel_bearing = (bear - self.last_head + 360) % 360
+        print(f"[DEBUG BEARING] Bearing caméra: {bear:.2f}°, Cap bateau: {self.last_head:.2f}°, Bearing relatif: {rel_bearing:.2f}°")
+        
+        # Envoyer le bearing absolu de la caméra au serveur WebSocket
+        if hasattr(self, 'ws_server'):
+            self.ws_server.update_bearing(bear)  # Bearing absolu de la caméra
+            print(f"[DEBUG BEARING] Bearing caméra envoyé au WebSocket: {bear:.2f}°")
+        else:
+            print("[DEBUG BEARING] ERREUR: ws_server non disponible")
+        
         # Envoi vers Arduino moteur pas à pas
         if hasattr(self, 'arduino') and self.arduino and self.arduino.is_open:
             bearing_int = int(round(bear)) % 360
@@ -509,6 +604,27 @@ class HomePage(QWidget):
             self.lrf_label.setText("-- m")
         else:
             self.lrf_label.setText(f"{dist_m:.2f} m")
+    def on_ws_bearing(self, bearing):
+        self.last_bear = bearing
+        self.bear_live.setText(f"Bearing : {bearing:.2f} °")
+        self.cap_live.setText(f"Cap visé : {bearing:.2f} °")
+        send_camera_as_cog_nmea(bearing, self.last_head)
+        self.compass_widget.set_camera_bearing(bearing)
+        # Envoi vers Arduino moteur pas à pas
+        if hasattr(self, 'arduino') and self.arduino and self.arduino.is_open:
+            bearing_int = int(round(bearing)) % 360
+            now = time.time()
+            if (self.last_sent_angle is None or
+                abs(bearing_int - self.last_sent_angle) > 2 or
+                (now - self.last_sent_time) > 0.12):
+                try:
+                    message = f"{bearing_int}\n"
+                    self.arduino.write(message.encode())
+                    print(f"[DEBUG] Envoi vers moteur pas-à-pas (WS) : {bearing_int}")
+                    self.last_sent_angle = bearing_int
+                    self.last_sent_time = now
+                except Exception as e:
+                    print(f"[ERREUR] Envoi série moteur (WS) : {e}")
     def deg_to_bytes(self, angle, factor, neg_offset=False):
         raw = int(round(angle / factor + (31415.5 if neg_offset else 0))) & 0xFFFF
         return raw & 0xFF, raw >> 8 

@@ -13,7 +13,7 @@ import time
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VIGY - Application Moderne")
+        self.setWindowTitle("VIGY - CAMERA CONTROL - Couach_2025")
         self.resize(1700, 1050)
         self.setMinimumWidth(1500)
         self.setMinimumHeight(900)
